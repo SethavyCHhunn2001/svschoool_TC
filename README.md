@@ -72,3 +72,4 @@ The repo currently has no automated test suite. Before production use, add integ
 This is a working initial system foundation, not a claim that every requested production workflow is complete. Password reset and account provisioning UI, Multer uploads, PDF/Excel report generation, detailed timetable conflict checks, automated ranking/GPA calculation, and end-to-end tests are not included yet. File upload and PDFKit dependencies are intentionally not added until those workflows are implemented. Keep secrets out of source control and use a managed secret store in production.
 
 See [docs/api.md](./docs/api.md) for routes and [docs/database.md](./docs/database.md) for the MongoDB schema map.
+# svschoool_TC
