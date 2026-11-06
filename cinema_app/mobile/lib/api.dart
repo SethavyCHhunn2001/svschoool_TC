@@ -18,7 +18,7 @@ class ApiClient {
 
   static const baseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://127.0.0.1:3000/api',
+    defaultValue: 'https://cinema-api.example.invalid/api',
   );
   static const _tokenKey = 'cinema_auth_token';
 

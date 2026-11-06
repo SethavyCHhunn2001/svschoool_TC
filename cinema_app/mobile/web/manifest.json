@@ -1,6 +1,6 @@
 {
-    "name": "cinema_app",
-    "short_name": "cinema_app",
+    "name": "CINÉMA",
+    "short_name": "CINÉMA",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

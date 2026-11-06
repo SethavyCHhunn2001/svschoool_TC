@@ -24,6 +24,23 @@ Bookings confirm ticket reservations only; payment processing is not included.
 
 Requirements: Flutter/Dart, Node.js 20+, and either Docker or a MongoDB server.
 
+## Host the Flutter web app on GitHub Pages
+
+The workflow at `.github/workflows/deploy-cinema-pages.yml` builds and deploys
+the Flutter web app whenever the mobile app or deployment workflow changes on
+`main` or `feature/cinema-flutter-mongodb`. In the repository's **Settings →
+Pages**, set the build and deployment source to **GitHub Actions**. The first
+deployment is then available at
+`https://sethavychhunn2001.github.io/svschoool_TC/`.
+
+GitHub Pages hosts static files only; it cannot run the Express API or MongoDB.
+For live sign-in, bookings, movies, and watchlists, deploy the API separately,
+use a reachable MongoDB service, allow the Pages site's origin in API CORS,
+and add the Actions repository variable `CINEMA_API_BASE_URL` with the full
+API URL ending in `/api` (for example `https://api.example.com/api`). Then
+rerun the **Deploy CINÉMA to GitHub Pages** workflow. Without that variable,
+the site still builds, but API-backed features cannot connect.
+
 1. Configure the API:
 
    ```sh
