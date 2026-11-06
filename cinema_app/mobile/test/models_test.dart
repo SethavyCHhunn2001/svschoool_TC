@@ -52,6 +52,7 @@ void main() {
     expect(showtime.id, 'showtime-id');
     expect(showtime.movie.title, 'Stellar Void');
     expect(showtime.screen.cinemaId, 'cinema-id');
+    expect(showtime.screen.cinemaName, 'Central');
     expect(showtime.bookedSeats, ['A1']);
   });
 }

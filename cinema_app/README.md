@@ -8,6 +8,9 @@ movie, cinema, showtime, screen, booking, and review data from the API.
 
 - Email/password registration and login with hashed passwords and signed JWTs.
 - Browse movies, cinema locations, auditorium screens, and upcoming showtimes.
+- Search and filter movies by title, genre, or cast.
+- Keep a MongoDB-backed watchlist synced to the signed-in account.
+- Profile, bookings, settings, privacy, help, and app information screens.
 - View movie details and write one review per user/movie.
 - Choose seats and book up to eight tickets; seat reservations are checked
   atomically in MongoDB.
@@ -89,6 +92,8 @@ All endpoints are prefixed with `/api`.
 | `POST` | `/auth/register` | Public | Create a regular account |
 | `POST` | `/auth/login` | Public | Sign in |
 | `GET` | `/auth/me` | User | Get the current account |
+| `GET` | `/watchlist/me` | User | List saved movies |
+| `PUT`, `DELETE` | `/watchlist/:movieId` | User | Save/remove a movie |
 | `GET` | `/movies` | Public | List/search movies |
 | `POST` | `/movies` | Admin | Add a movie |
 | `PUT`, `DELETE` | `/movies/:id` | Admin | Update/delete a movie |

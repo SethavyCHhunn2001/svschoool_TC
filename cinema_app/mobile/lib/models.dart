@@ -73,6 +73,7 @@ class Screen {
   const Screen({
     required this.id,
     required this.cinemaId,
+    required this.cinemaName,
     required this.name,
     required this.rows,
     required this.columns,
@@ -82,6 +83,7 @@ class Screen {
 
   final String id;
   final String cinemaId;
+  final String cinemaName;
   final String name;
   final int rows;
   final int columns;
@@ -95,6 +97,9 @@ class Screen {
       cinemaId: cinema is Map<String, dynamic>
           ? _id(cinema)
           : cinema.toString(),
+      cinemaName: cinema is Map<String, dynamic>
+          ? cinema['name'] as String? ?? ''
+          : '',
       name: json['name'] as String? ?? '',
       rows: (json['rows'] as num?)?.toInt() ?? 0,
       columns: (json['columns'] as num?)?.toInt() ?? 0,

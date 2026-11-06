@@ -84,6 +84,43 @@ api.get("/auth/me", requireAuth, (req, res) => {
   res.json({ user: userDto(req.user) });
 });
 
+api.get("/watchlist/me", requireAuth, async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user.id).populate("watchlist");
+    res.json({
+      movies: (user?.watchlist ?? []).filter(Boolean),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+api.put("/watchlist/:movieId", requireAuth, async (req, res, next) => {
+  try {
+    const movie = await Movie.findById(req.params.movieId);
+    if (!movie) return res.status(404).json({ error: "Movie not found." });
+    await User.updateOne(
+      { _id: req.user.id },
+      { $addToSet: { watchlist: movie.id } },
+    );
+    return res.json({ saved: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+api.delete("/watchlist/:movieId", requireAuth, async (req, res, next) => {
+  try {
+    await User.updateOne(
+      { _id: req.user.id },
+      { $pull: { watchlist: req.params.movieId } },
+    );
+    return res.json({ saved: false });
+  } catch (error) {
+    next(error);
+  }
+});
+
 api.get("/movies", async (req, res, next) => {
   try {
     const filter = {};

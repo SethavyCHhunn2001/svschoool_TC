@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api.dart';
 import 'models.dart';
@@ -266,6 +267,16 @@ class _AuthPageState extends State<AuthPage> {
                         : 'New to CINÉMA? Create an account',
                   ),
                 ),
+                if (!_register)
+                  TextButton(
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            ForgotPasswordPage(email: _email.text.trim()),
+                      ),
+                    ),
+                    child: const Text('Forgot password?'),
+                  ),
               ],
             ),
           ),
@@ -294,27 +305,39 @@ class CinemaHome extends StatefulWidget {
 class _CinemaHomeState extends State<CinemaHome> {
   late final List<Widget> _pages;
   final _moviesKey = GlobalKey<_MoviesPageState>();
-  final _cinemasKey = GlobalKey<_CinemasPageState>();
-  final _bookingsKey = GlobalKey<_BookingsPageState>();
-  final _adminKey = GlobalKey<_AdminPageState>();
+  final _searchKey = GlobalKey<_SearchPageState>();
+  final _watchlistKey = GlobalKey<_WatchlistPageState>();
   int _index = 0;
   bool get _isAdmin => widget.user['role'] == 'admin';
-  late final List<String> _labels = [
-    'Movies',
-    'Cinemas',
-    'Bookings',
-    if (_isAdmin) 'Manage',
-  ];
+  late final List<String> _labels = ['Home', 'Search', 'Watchlist', 'Profile'];
 
   @override
   void initState() {
     super.initState();
     _pages = [
       MoviesPage(key: _moviesKey, api: widget.api),
-      CinemasPage(key: _cinemasKey, api: widget.api),
-      BookingsPage(key: _bookingsKey, api: widget.api),
-      if (_isAdmin) AdminPage(key: _adminKey, api: widget.api),
+      SearchPage(key: _searchKey, api: widget.api),
+      WatchlistPage(key: _watchlistKey, api: widget.api),
+      ProfilePage(
+        api: widget.api,
+        user: widget.user,
+        onSignOut: widget.onSignOut,
+        onOpenCinemas: () => _openPage(CinemasPage(api: widget.api)),
+        onOpenBookings: () => _openPage(BookingsPage(api: widget.api)),
+        onOpenManage: _isAdmin
+            ? () => _openPage(AdminPage(api: widget.api))
+            : null,
+      ),
     ];
+  }
+
+  Future<void> _openPage(Widget page) async {
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
+    if (mounted) {
+      _moviesKey.currentState?.reload();
+      _searchKey.currentState?.reload();
+      _watchlistKey.currentState?.reload();
+    }
   }
 
   void _selectTab(int index) {
@@ -323,11 +346,11 @@ class _CinemaHomeState extends State<CinemaHome> {
       case 0:
         _moviesKey.currentState?.reload();
       case 1:
-        _cinemasKey.currentState?.reload();
+        _searchKey.currentState?.reload();
       case 2:
-        _bookingsKey.currentState?.reload();
+        _watchlistKey.currentState?.reload();
       case 3:
-        _adminKey.currentState?.reload();
+        break;
     }
   }
 
@@ -335,9 +358,9 @@ class _CinemaHomeState extends State<CinemaHome> {
   Widget build(BuildContext context) {
     final icons = [
       Icons.local_movies_outlined,
-      Icons.location_city_outlined,
-      Icons.confirmation_num_outlined,
-      if (_isAdmin) Icons.dashboard_customize_outlined,
+      Icons.search_rounded,
+      Icons.bookmark_outline_rounded,
+      Icons.person_outline_rounded,
     ];
     return Scaffold(
       appBar: AppBar(
@@ -467,10 +490,18 @@ class _MoviesPageState extends State<MoviesPage> {
 }
 
 class MovieCard extends StatelessWidget {
-  const MovieCard({required this.movie, required this.onTap, super.key});
+  const MovieCard({
+    required this.movie,
+    required this.onTap,
+    this.isSaved = false,
+    this.onToggleSaved,
+    super.key,
+  });
 
   final Movie movie;
   final VoidCallback onTap;
+  final bool isSaved;
+  final VoidCallback? onToggleSaved;
 
   @override
   Widget build(BuildContext context) => Card(
@@ -559,37 +590,48 @@ class MovieCard extends StatelessWidget {
               ),
             ),
           ),
+          if (onToggleSaved != null)
+            IconButton(
+              tooltip: isSaved ? 'Remove from watchlist' : 'Add to watchlist',
+              onPressed: onToggleSaved,
+              icon: Icon(
+                isSaved ? Icons.bookmark : Icons.bookmark_add_outlined,
+                color: isSaved ? CinemaColors.accent : CinemaColors.muted,
+              ),
+            ),
         ],
       ),
     ),
   );
 }
 
-class MovieDetailsPage extends StatefulWidget {
-  const MovieDetailsPage({required this.api, required this.movie, super.key});
+class SearchPage extends StatefulWidget {
+  const SearchPage({required this.api, super.key});
 
   final ApiClient api;
-  final Movie movie;
 
   @override
-  State<MovieDetailsPage> createState() => _MovieDetailsPageState();
+  State<SearchPage> createState() => _SearchPageState();
 }
 
-class _MovieDetailsPageState extends State<MovieDetailsPage> {
+class _SearchPageState extends State<SearchPage> {
+  final _query = TextEditingController();
   late Future<List<dynamic>> _data;
+  String _genre = 'All';
 
   Future<List<dynamic>> _load() async {
     final responses = await Future.wait([
-      widget.api.get('/showtimes?movieId=${widget.movie.id}'),
-      widget.api.get('/movies/${widget.movie.id}/reviews'),
+      widget.api.get('/movies'),
+      widget.api.get('/watchlist/me'),
     ]);
     return [
-      (responses[0]['showtimes'] as List<dynamic>)
-          .map((item) => Showtime.fromJson(item as Map<String, dynamic>))
+      (responses[0]['movies'] as List<dynamic>)
+          .map((item) => Movie.fromJson(item as Map<String, dynamic>))
           .toList(),
-      (responses[1]['reviews'] as List<dynamic>)
-          .map((item) => Review.fromJson(item as Map<String, dynamic>))
-          .toList(),
+      (responses[1]['movies'] as List<dynamic>)
+          .map((item) => Movie.fromJson(item as Map<String, dynamic>))
+          .map((movie) => movie.id)
+          .toSet(),
     ];
   }
 
@@ -597,6 +639,786 @@ class _MovieDetailsPageState extends State<MovieDetailsPage> {
   void initState() {
     super.initState();
     _data = _load();
+    _query.addListener(_searchChanged);
+  }
+
+  @override
+  void dispose() {
+    _query
+      ..removeListener(_searchChanged)
+      ..dispose();
+    super.dispose();
+  }
+
+  void _searchChanged() => setState(() {});
+
+  void reload() {
+    setState(() {
+      _data = _load();
+    });
+  }
+
+  Future<void> _toggleSaved(Movie movie, Set<String> saved) async {
+    final wasSaved = saved.contains(movie.id);
+    setState(() {
+      if (wasSaved) {
+        saved.remove(movie.id);
+      } else {
+        saved.add(movie.id);
+      }
+    });
+    try {
+      await (wasSaved
+          ? widget.api.delete('/watchlist/${movie.id}')
+          : widget.api.put('/watchlist/${movie.id}', const {}));
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        if (wasSaved) {
+          saved.add(movie.id);
+        } else {
+          saved.remove(movie.id);
+        }
+      });
+      showMessage(context, error.message);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<List<dynamic>>(
+    future: _data,
+    builder: (context, snapshot) {
+      if (snapshot.hasError) {
+        return ErrorPanel(error: snapshot.error!, onRetry: reload);
+      }
+      if (!snapshot.hasData) {
+        return const Center(child: CircularProgressIndicator());
+      }
+      final movies = snapshot.data![0] as List<Movie>;
+      final saved = snapshot.data![1] as Set<String>;
+      final genres = [
+        'All',
+        ...movies.map((movie) => movie.genre).toSet().toList()..sort(),
+      ];
+      final results = movies.where((movie) {
+        final matchesQuery =
+            _query.text.trim().isEmpty ||
+            '${movie.title} ${movie.genre} ${movie.cast.join(' ')}'
+                .toLowerCase()
+                .contains(_query.text.trim().toLowerCase());
+        return matchesQuery && (_genre == 'All' || movie.genre == _genre);
+      }).toList();
+      return Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+            child: TextField(
+              controller: _query,
+              decoration: InputDecoration(
+                hintText: 'Search movies, genres, cast...',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: _query.text.isEmpty
+                    ? null
+                    : IconButton(
+                        onPressed: _query.clear,
+                        icon: const Icon(Icons.close),
+                      ),
+              ),
+            ),
+          ),
+          SizedBox(
+            height: 54,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              children: [
+                for (final genre in genres)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: ChoiceChip(
+                      label: Text(genre),
+                      selected: _genre == genre,
+                      onSelected: (_) => setState(() => _genre = genre),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: results.isEmpty
+                ? const EmptyPanel(
+                    icon: Icons.search_off,
+                    message: 'No movies match your search.',
+                  )
+                : ListView.builder(
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
+                    itemCount: results.length,
+                    itemBuilder: (context, index) {
+                      final movie = results[index];
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: MovieCard(
+                          movie: movie,
+                          isSaved: saved.contains(movie.id),
+                          onToggleSaved: () => _toggleSaved(movie, saved),
+                          onTap: () async {
+                            await Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => MovieDetailsPage(
+                                  api: widget.api,
+                                  movie: movie,
+                                  initiallySaved: saved.contains(movie.id),
+                                ),
+                              ),
+                            );
+                            if (mounted) reload();
+                          },
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      );
+    },
+  );
+}
+
+class WatchlistPage extends StatefulWidget {
+  const WatchlistPage({required this.api, super.key});
+
+  final ApiClient api;
+
+  @override
+  State<WatchlistPage> createState() => _WatchlistPageState();
+}
+
+class _WatchlistPageState extends State<WatchlistPage> {
+  late Future<List<Movie>> _movies;
+
+  Future<List<Movie>> _load() async {
+    final response = await widget.api.get('/watchlist/me');
+    return (response['movies'] as List<dynamic>)
+        .map((item) => Movie.fromJson(item as Map<String, dynamic>))
+        .toList();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _movies = _load();
+  }
+
+  void reload() {
+    setState(() {
+      _movies = _load();
+    });
+  }
+
+  Future<void> _remove(Movie movie) async {
+    final previous = await _movies;
+    setState(() {
+      _movies = Future.value(
+        previous.where((item) => item.id != movie.id).toList(),
+      );
+    });
+    try {
+      await widget.api.delete('/watchlist/${movie.id}');
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      showMessage(context, error.message);
+      reload();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<List<Movie>>(
+    future: _movies,
+    builder: (context, snapshot) {
+      if (snapshot.hasError) {
+        return ErrorPanel(error: snapshot.error!, onRetry: reload);
+      }
+      if (!snapshot.hasData) {
+        return const Center(child: CircularProgressIndicator());
+      }
+      if (snapshot.data!.isEmpty) {
+        return const EmptyPanel(
+          icon: Icons.bookmark_border,
+          message: 'Save movies here to keep your watchlist in sync.',
+        );
+      }
+      return RefreshIndicator(
+        onRefresh: () async {
+          final next = _load();
+          setState(() => _movies = next);
+          await next;
+        },
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            const Padding(
+              padding: EdgeInsets.only(bottom: 14),
+              child: SectionTitle('MY WATCHLIST'),
+            ),
+            for (final movie in snapshot.data!)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: MovieCard(
+                  movie: movie,
+                  isSaved: true,
+                  onToggleSaved: () => _remove(movie),
+                  onTap: () async {
+                    await Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => MovieDetailsPage(
+                          api: widget.api,
+                          movie: movie,
+                          initiallySaved: true,
+                        ),
+                      ),
+                    );
+                    if (mounted) reload();
+                  },
+                ),
+              ),
+          ],
+        ),
+      );
+    },
+  );
+}
+
+class ProfilePage extends StatelessWidget {
+  const ProfilePage({
+    required this.api,
+    required this.user,
+    required this.onSignOut,
+    required this.onOpenCinemas,
+    required this.onOpenBookings,
+    this.onOpenManage,
+    super.key,
+  });
+
+  final ApiClient api;
+  final Map<String, dynamic> user;
+  final Future<void> Function() onSignOut;
+  final VoidCallback onOpenCinemas;
+  final VoidCallback onOpenBookings;
+  final VoidCallback? onOpenManage;
+
+  @override
+  Widget build(BuildContext context) {
+    final name = user['name'] as String? ?? 'Moviegoer';
+    final email = user['email'] as String? ?? '';
+    final initials = name
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((part) => part.isNotEmpty)
+        .take(2)
+        .map((part) => part[0].toUpperCase())
+        .join();
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        const SizedBox(height: 8),
+        CircleAvatar(
+          radius: 38,
+          backgroundColor: CinemaColors.accent,
+          child: Text(initials, style: const TextStyle(fontSize: 22)),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          name,
+          textAlign: TextAlign.center,
+          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+        ),
+        Text(
+          email,
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: CinemaColors.muted),
+        ),
+        const SizedBox(height: 26),
+        const SectionTitle('YOUR CINÉMA'),
+        const SizedBox(height: 8),
+        _ProfileLink(
+          icon: Icons.confirmation_num_outlined,
+          title: 'My bookings',
+          onTap: onOpenBookings,
+        ),
+        _ProfileLink(
+          icon: Icons.location_city_outlined,
+          title: 'Cinemas and showtimes',
+          onTap: onOpenCinemas,
+        ),
+        if (onOpenManage != null)
+          _ProfileLink(
+            icon: Icons.admin_panel_settings_outlined,
+            title: 'Manage cinema catalog',
+            onTap: onOpenManage!,
+          ),
+        const SizedBox(height: 18),
+        const SectionTitle('ACCOUNT'),
+        const SizedBox(height: 8),
+        _ProfileLink(
+          icon: Icons.settings_outlined,
+          title: 'Settings',
+          onTap: () => Navigator.of(context)
+              .push(MaterialPageRoute(builder: (_) => const SettingsPage())),
+        ),
+        _ProfileLink(
+          icon: Icons.help_outline,
+          title: 'Help & support',
+          onTap: () =>
+              Navigator.of(context)
+                  .push(MaterialPageRoute(builder: (_) => const HelpPage())),
+        ),
+        _ProfileLink(
+          icon: Icons.info_outline,
+          title: 'About CINÉMA',
+          onTap: () =>
+              Navigator.of(context)
+                  .push(MaterialPageRoute(builder: (_) => const AboutPage())),
+        ),
+        _ProfileLink(
+          icon: Icons.logout,
+          title: 'Sign out',
+          color: CinemaColors.accent,
+          onTap: onSignOut,
+        ),
+      ],
+    );
+  }
+}
+
+class _ProfileLink extends StatelessWidget {
+  const _ProfileLink({
+    required this.icon,
+    required this.title,
+    required this.onTap,
+    this.color = CinemaColors.text,
+  });
+
+  final IconData icon;
+  final String title;
+  final VoidCallback onTap;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => Card(
+    color: CinemaColors.card,
+    child: ListTile(
+      leading: Icon(icon, color: color),
+      title: Text(title, style: TextStyle(color: color)),
+      trailing: const Icon(Icons.chevron_right, color: CinemaColors.muted),
+      onTap: onTap,
+    ),
+  );
+}
+
+class SettingsPage extends StatelessWidget {
+  const SettingsPage({super.key});
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Settings')),
+    body: ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        const SectionTitle('PREFERENCES'),
+        _ProfileLink(
+          icon: Icons.language,
+          title: 'App language',
+          onTap: () => _openSetting(context, 'language'),
+        ),
+        _ProfileLink(
+          icon: Icons.notifications_outlined,
+          title: 'Notifications',
+          onTap: () => _openSetting(context, 'notifications'),
+        ),
+        _ProfileLink(
+          icon: Icons.high_quality_outlined,
+          title: 'Streaming quality',
+          onTap: () => _openSetting(context, 'quality'),
+        ),
+        _ProfileLink(
+          icon: Icons.download_outlined,
+          title: 'Downloads',
+          onTap: () => _openSetting(context, 'downloads'),
+        ),
+        const SizedBox(height: 16),
+        const SectionTitle('ACCOUNT'),
+        _ProfileLink(
+          icon: Icons.privacy_tip_outlined,
+          title: 'Privacy',
+          onTap: () => _openSetting(context, 'privacy'),
+        ),
+        _ProfileLink(
+          icon: Icons.help_outline,
+          title: 'Help & support',
+          onTap: () =>
+              Navigator.of(context)
+                  .push(MaterialPageRoute(builder: (_) => const HelpPage())),
+        ),
+        _ProfileLink(
+          icon: Icons.info_outline,
+          title: 'About CINÉMA',
+          onTap: () =>
+              Navigator.of(context)
+                  .push(MaterialPageRoute(builder: (_) => const AboutPage())),
+        ),
+      ],
+    ),
+  );
+}
+
+void _openSetting(BuildContext context, String setting) {
+  Navigator.of(context).push(
+    MaterialPageRoute(builder: (_) => SettingDetailPage(setting: setting)),
+  );
+}
+
+class SettingDetailPage extends StatefulWidget {
+  const SettingDetailPage({required this.setting, super.key});
+
+  final String setting;
+
+  @override
+  State<SettingDetailPage> createState() => _SettingDetailPageState();
+}
+
+class _SettingDetailPageState extends State<SettingDetailPage> {
+  String? _value;
+  bool? _enabled;
+
+  static const _languages = ['English', 'French', 'Spanish', 'Khmer', 'Arabic'];
+  static const _qualities = ['Auto', 'Low', 'Standard', 'High'];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPreference();
+  }
+
+  Future<void> _loadPreference() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      switch (widget.setting) {
+        case 'language':
+          _value = prefs.getString('cinema_language') ?? 'English';
+        case 'quality':
+          _value = prefs.getString('cinema_streaming_quality') ?? 'Auto';
+        case 'notifications':
+          _enabled = prefs.getBool('cinema_notifications') ?? true;
+        case 'downloads':
+          _value = prefs.getString('cinema_download_quality') ?? 'Standard';
+      }
+    });
+  }
+
+  String get _title => switch (widget.setting) {
+    'language' => 'App language',
+    'notifications' => 'Notifications',
+    'quality' => 'Streaming quality',
+    'downloads' => 'Downloads',
+    'privacy' => 'Privacy',
+    _ => 'Settings',
+  };
+
+  Future<void> _saveValue(String key, String value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(key, value);
+    if (mounted) setState(() => _value = value);
+  }
+
+  Future<void> _saveEnabled(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('cinema_notifications', enabled);
+    if (mounted) setState(() => _enabled = enabled);
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: Text(_title)),
+    body: ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        if (widget.setting == 'language' && _value != null) ...[
+          const Text(
+            'Choose your preferred language. The current app interface is in English.',
+            style: TextStyle(color: CinemaColors.muted),
+          ),
+          const SizedBox(height: 16),
+          RadioGroup<String>(
+            groupValue: _value!,
+            onChanged: (value) {
+              if (value != null) _saveValue('cinema_language', value);
+            },
+            child: Column(
+              children: [
+                for (final language in _languages)
+                  RadioListTile<String>(value: language, title: Text(language)),
+              ],
+            ),
+          ),
+        ],
+        if (widget.setting == 'notifications' && _enabled != null)
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Booking and movie updates'),
+            subtitle: const Text(
+              'Save your notification preference on this device.',
+            ),
+            value: _enabled!,
+            onChanged: _saveEnabled,
+          ),
+        if (widget.setting == 'quality' && _value != null) ...[
+          const Text(
+            'Choose a preferred playback quality.',
+            style: TextStyle(color: CinemaColors.muted),
+          ),
+          const SizedBox(height: 16),
+          RadioGroup<String>(
+            groupValue: _value!,
+            onChanged: (value) {
+              if (value != null) {
+                _saveValue('cinema_streaming_quality', value);
+              }
+            },
+            child: Column(
+              children: [
+                for (final quality in _qualities)
+                  RadioListTile<String>(value: quality, title: Text(quality)),
+              ],
+            ),
+          ),
+        ],
+        if (widget.setting == 'downloads')
+          const EmptyPanel(
+            icon: Icons.download_outlined,
+            message: 'Offline movie downloads are not available yet. Your watchlist and tickets remain available online.',
+          ),
+        if (widget.setting == 'privacy')
+          const Card(
+            color: CinemaColors.card,
+            child: Padding(
+              padding: EdgeInsets.all(18),
+              child: Text(
+                'Your cinema account, bookings, reviews, and saved movies are stored by the CINÉMA API. Sign out from your profile to remove the saved login token from this device.',
+                style: TextStyle(height: 1.5),
+              ),
+            ),
+          ),
+      ],
+    ),
+  );
+}
+
+class HelpPage extends StatelessWidget {
+  const HelpPage({super.key});
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Help & support')),
+    body: ListView(
+      padding: const EdgeInsets.all(20),
+      children: const [
+        SectionTitle('HOW CAN WE HELP?'),
+        SizedBox(height: 12),
+        Card(
+          color: CinemaColors.card,
+          child: Padding(
+            padding: EdgeInsets.all(18),
+            child: Text(
+              'For help with a booking, please contact the cinema shown in your booking details. Keep your booking and seat information ready.',
+              style: TextStyle(height: 1.5),
+            ),
+          ),
+        ),
+        Card(
+          color: CinemaColors.card,
+          child: ListTile(
+            leading: Icon(Icons.lock_reset, color: CinemaColors.accent),
+            title: Text('Password reset'),
+            subtitle: Text(
+              'Automated reset emails are not configured. Contact your cinema administrator for account help.',
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class AboutPage extends StatelessWidget {
+  const AboutPage({super.key});
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('About CINÉMA')),
+    body: Center(
+      child: Padding(
+        padding: const EdgeInsets.all(28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.play_circle_fill_rounded,
+              color: CinemaColors.accent,
+              size: 72,
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'CINÉMA',
+              style: TextStyle(fontSize: 28, letterSpacing: 8),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Your world of film',
+              style: TextStyle(color: CinemaColors.muted),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              'Version $appVersion',
+              style: const TextStyle(color: CinemaColors.muted),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+const appVersion = '1.0.0';
+
+class ForgotPasswordPage extends StatefulWidget {
+  const ForgotPasswordPage({this.email = '', super.key});
+
+  final String email;
+
+  @override
+  State<ForgotPasswordPage> createState() => _ForgotPasswordPageState();
+}
+
+class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
+  late final TextEditingController _email;
+
+  @override
+  void initState() {
+    super.initState();
+    _email = TextEditingController(text: widget.email);
+  }
+
+  @override
+  void dispose() {
+    _email.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Forgot password?')),
+    body: ListView(
+      padding: const EdgeInsets.all(24),
+      children: [
+        const Icon(
+          Icons.lock_reset_rounded,
+          size: 58,
+          color: CinemaColors.accent,
+        ),
+        const SizedBox(height: 18),
+        const Text(
+          'Need help signing in?',
+          style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 10),
+        const Text(
+          'Enter your email so support can identify your account.',
+          style: TextStyle(color: CinemaColors.muted),
+        ),
+        const SizedBox(height: 22),
+        TextField(
+          controller: _email,
+          keyboardType: TextInputType.emailAddress,
+          decoration: const InputDecoration(labelText: 'Email address'),
+        ),
+        const SizedBox(height: 18),
+        const Card(
+          color: CinemaColors.card,
+          child: Padding(
+            padding: EdgeInsets.all(16),
+            child: Text(
+              'Password reset emails are not configured for this app yet. Please contact your cinema administrator to reset your account.',
+              style: TextStyle(height: 1.5),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class MovieDetailsPage extends StatefulWidget {
+  const MovieDetailsPage({
+    required this.api,
+    required this.movie,
+    this.initiallySaved = false,
+    super.key,
+  });
+
+  final ApiClient api;
+  final Movie movie;
+  final bool initiallySaved;
+
+  @override
+  State<MovieDetailsPage> createState() => _MovieDetailsPageState();
+}
+
+class _MovieDetailsPageState extends State<MovieDetailsPage> {
+  late Future<List<dynamic>> _data;
+  late bool _saved;
+
+  Future<List<dynamic>> _load() async {
+    final responses = await Future.wait([
+      widget.api.get('/showtimes?movieId=${widget.movie.id}'),
+      widget.api.get('/movies/${widget.movie.id}/reviews'),
+      widget.api.get('/watchlist/me'),
+    ]);
+    final savedMovies = (responses[2]['movies'] as List<dynamic>)
+        .map((item) => item as Map<String, dynamic>)
+        .map((item) => (item['_id'] ?? item['id']).toString())
+        .toSet();
+    _saved = savedMovies.contains(widget.movie.id) || widget.initiallySaved;
+    return [
+      (responses[0]['showtimes'] as List<dynamic>)
+          .map((item) => Showtime.fromJson(item as Map<String, dynamic>))
+          .toList(),
+      (responses[1]['reviews'] as List<dynamic>)
+          .map((item) => Review.fromJson(item as Map<String, dynamic>))
+          .toList(),
+      _saved,
+    ];
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _saved = widget.initiallySaved;
+    _data = _load();
+  }
+
+  Future<void> _toggleWatchlist() async {
+    final wasSaved = _saved;
+    setState(() => _saved = !wasSaved);
+    try {
+      await (wasSaved
+          ? widget.api.delete('/watchlist/${widget.movie.id}')
+          : widget.api.put('/watchlist/${widget.movie.id}', const {}));
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      setState(() => _saved = wasSaved);
+      showMessage(context, error.message);
+    }
   }
 
   Future<void> _writeReview() async {
@@ -622,7 +1444,19 @@ class _MovieDetailsPageState extends State<MovieDetailsPage> {
   Widget build(BuildContext context) {
     final movie = widget.movie;
     return Scaffold(
-      appBar: AppBar(title: Text(movie.title)),
+      appBar: AppBar(
+        title: Text(movie.title),
+        actions: [
+          IconButton(
+            tooltip: _saved ? 'Remove from watchlist' : 'Add to watchlist',
+            onPressed: _toggleWatchlist,
+            icon: Icon(
+              _saved ? Icons.bookmark : Icons.bookmark_add_outlined,
+              color: _saved ? CinemaColors.accent : null,
+            ),
+          ),
+        ],
+      ),
       body: FutureBuilder<List<dynamic>>(
         future: _data,
         builder: (context, snapshot) {
@@ -1108,13 +1942,19 @@ class _BookingPageState extends State<BookingPage> {
   Future<void> _confirm() async {
     setState(() => _busy = true);
     try {
-      await widget.api.post('/bookings', {
+      final response = await widget.api.post('/bookings', {
         'showtimeId': widget.showtime.id,
         'seats': _selected.toList(),
       });
       if (!mounted) return;
-      showMessage(context, 'Booking confirmed and saved.');
-      Navigator.pop(context, true);
+      final booking = Booking.fromJson(
+        response['booking'] as Map<String, dynamic>,
+      );
+      await Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => BookingConfirmationPage(booking: booking),
+        ),
+      );
     } on ApiException catch (error) {
       if (mounted) showMessage(context, error.message);
     } finally {
@@ -1225,6 +2065,132 @@ class _BookingPageState extends State<BookingPage> {
       ),
     );
   }
+}
+
+class BookingConfirmationPage extends StatelessWidget {
+  const BookingConfirmationPage({required this.booking, super.key});
+
+  final Booking booking;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(
+      title: const Text('Your ticket'),
+      automaticallyImplyLeading: false,
+    ),
+    body: ListView(
+      padding: const EdgeInsets.all(24),
+      children: [
+        const SizedBox(height: 12),
+        const Icon(
+          Icons.check_circle_rounded,
+          size: 74,
+          color: Color(0xFF55C878),
+        ),
+        const SizedBox(height: 12),
+        const Text(
+          'Booking confirmed!',
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Your seats are reserved. Show this ticket at the cinema.',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: CinemaColors.muted),
+        ),
+        const SizedBox(height: 28),
+        Card(
+          color: CinemaColors.card,
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  booking.showtime.movie.title,
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '${booking.showtime.startAt.day}/${booking.showtime.startAt.month}/${booking.showtime.startAt.year} · ${formatTime(booking.showtime.startAt)}',
+                  style: const TextStyle(color: CinemaColors.muted),
+                ),
+                const Divider(height: 28),
+                _TicketDetail(
+                  label: 'Cinema',
+                  value: booking.showtime.screen.cinemaName,
+                ),
+                _TicketDetail(
+                  label: 'Screen',
+                  value: booking.showtime.screen.name,
+                ),
+                _TicketDetail(label: 'Seats', value: booking.seats.join(', ')),
+                _TicketDetail(
+                  label: 'Total',
+                  value: booking.total.toStringAsFixed(2),
+                ),
+                const Divider(height: 28),
+                const Center(
+                  child: Icon(
+                    Icons.confirmation_number_rounded,
+                    size: 94,
+                    color: CinemaColors.text,
+                  ),
+                ),
+                Center(
+                  child: Text(
+                    'Booking ${booking.id}',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: CinemaColors.muted,
+                      fontSize: 11,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 18),
+        FilledButton(
+          onPressed: () =>
+              Navigator.of(context).popUntil((route) => route.isFirst),
+          child: const Text('Back to CINÉMA'),
+        ),
+      ],
+    ),
+  );
+}
+
+class _TicketDetail extends StatelessWidget {
+  const _TicketDetail({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 5),
+    child: Row(
+      children: [
+        SizedBox(
+          width: 72,
+          child: Text(label, style: const TextStyle(color: CinemaColors.muted)),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            textAlign: TextAlign.end,
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 class _SeatButton extends StatelessWidget {
